@@ -1,0 +1,21 @@
+# Ambientes virtuales
+venv/
+env/
+.venv/
+
+# Variables de entorno (¡Muy Importante!)
+.env
+.env.*
+!.env.example
+
+# Archivos de caché de Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Archivos de Streamlit
+.streamlit/
+
+# Dependencias del SO
+.DS_Store
+Thumbs.db
