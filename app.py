@@ -6,6 +6,8 @@ import boto3
 from botocore.config import Config
 from dotenv import load_dotenv
 import uuid
+import redis
+import json
 
 # Load environment variables
 load_dotenv()
@@ -18,6 +20,10 @@ B2_ENDPOINT_URL = os.environ.get("B2_ENDPOINT_URL", "")
 B2_KEY_ID = os.environ.get("B2_KEY_ID", "")
 B2_APPLICATION_KEY = os.environ.get("B2_APPLICATION_KEY", "")
 B2_BUCKET_NAME = os.environ.get("B2_BUCKET_NAME", "")
+REDIS_HOST = os.environ.get("REDIS_HOST", "")
+REDIS_PORT = os.environ.get("REDIS_PORT", "16358")
+REDIS_USER = os.environ.get("REDIS_USER", "default")
+REDIS_PASSWORD = os.environ.get("REDIS_PASSWORD", "")
 
 # --- Initialize Clients ---
 @st.cache_resource
@@ -56,10 +62,26 @@ def init_b2():
         st.error(f"Error inicializando B2: {e}")
     return None
 
+@st.cache_resource
+def init_redis():
+    try:
+        if REDIS_HOST and REDIS_PORT:
+            return redis.Redis(
+                host=REDIS_HOST,
+                port=int(REDIS_PORT),
+                decode_responses=True,
+                username=REDIS_USER,
+                password=REDIS_PASSWORD
+            )
+    except Exception as e:
+        st.error(f"Error inicializando Redis: {e}")
+    return None
+
+
 supabase = init_supabase()
 mongo_collection = init_mongodb()
 b2_client = init_b2()
-
+redis_client = init_redis()
 
 # --- UI: Setup ---
 st.set_page_config(page_title="Registro Universal en la Nube", page_icon="☁️", layout="centered")
@@ -74,7 +96,7 @@ Esta aplicación demuestra la integración de una arquitectura tripartita:
 
 st.divider()
 
-if not supabase or not mongo_collection or not b2_client:
+if supabase is None or mongo_collection is None or b2_client is None or redis_client is None:
     st.warning("⚠️ Faltan configurar las variables de entorno. Por favor revise el archivo INSTRUCCIONES.md y .env")
 
 # --- UI: Form ---
@@ -99,7 +121,7 @@ with st.form("registro_form"):
 if submit_button:
     if not nombre or not email:
         st.error("Por favor, complete el nombre y el correo electrónico.")
-    elif not supabase or not mongo_collection or not b2_client:
+    elif supabase is None or mongo_collection is None or b2_client is None or redis_client is None:
         st.error("Los servicios de backend no están configurados correctamente.")
     else:
         with st.spinner("Procesando datos en la nube..."):
@@ -145,8 +167,31 @@ if submit_button:
                     )
                     st.success(f"✅ Archivo guardado en Backblaze B2 como: `{unique_filename}`")
                 
+                # 4. Redis (Guardar log en cache)
+                log_entry = {
+                    "email": email,
+                    "tema": tema,
+                    "biografia": biografia
+                }
+                redis_client.lpush("user_registration_logs", json.dumps(log_entry))
+                redis_client.ltrim("user_registration_logs", 0, 19) # Mantener solo los ultimos 20
+                st.success("✅ Log de registro guardado en la caché de Redis.")
+
                 st.balloons()
                 st.info("El registro completo en la nube ha finalizado correctamente.")
                 
             except Exception as e:
                 st.error(f"Ocurrió un error durante el procesamiento: {e}")
+
+st.divider()
+st.subheader("📋 Log de Usuarios Recientes (Caché - Redis)")
+if redis_client:
+    try:
+        logs = redis_client.lrange("user_registration_logs", 0, -1)
+        if logs:
+            parsed_logs = [json.loads(log) for log in logs]
+            st.table(parsed_logs)
+        else:
+            st.info("No hay registros recientes en la caché.")
+    except Exception as e:
+        st.error(f"Error leyendo de Redis: {e}")                

@@ -3,3 +3,4 @@ supabase
 pymongo
 boto3
 python-dotenv
+redis
